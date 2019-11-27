@@ -3,15 +3,46 @@ from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from bs4 import BeautifulSoup
 from getpass import getpass
-import time,re
+from apiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
+import pickle,re,time
 
-from secret import *
+scopes = ["https://www.googleapis.com/auth/calendar"]
+
+try:
+	credentials = pickle.load(open("token.pkl", "rb"))
+except:
+	flow = InstalledAppFlow.from_client_secrets_file("client_secret.json",scopes=scopes)
+	credentials = flow.run_console()
+	pickle.dump(credentials, open("token.pkl", "wb"))
+
+service = build("calendar", "v3", credentials=credentials)
+result = service.calendarList().list().execute()
+calender_id = result['items'][0]['id']
+
+def makeEvent(c):
+    event = {
+        'summary' : c.num,
+        'location' : c.room,
+        'start': {'dateTime': c.date + 'T' + c.start + '-05:00',
+        'timeZone' : "America/New_York"},
+        'end': {'dateTime': c.date + 'T' + c.end + '-05:00',
+        'timeZone' : "America/New_York"},
+        "recurrence": [
+            "RRULE:FREQ=WEEKLY;UNTIL=20191212;BYDAY=" + ",".join(c.dow)
+        ]
+    }
+
+    event =service.events().insert(calendarId = calender_id, body = event).execute()
+    print(str(c.num),"Created")
 
 class Class:
 	def __init__(self,num,room,date,time):
 		self.num = num
 		self.room = room
-		self.date = date
+		self.date = date[1]
+		self.dow = date[0]
+
 		self.start,self.end = time.split(" ")	
 
 	def __str__(self):
@@ -19,9 +50,11 @@ class Class:
 		ret += self.room + " " 
 		ret += self.start + " " 
 		ret += self.end + " "
-		for i in range(len(self.date)):
-			ret += self.date[i][0] + " "
-			ret += self.date[i][1] + " "
+
+		for i in self.dow:
+			ret +=(i) + " "
+
+		ret += self.date
 		return ret
 
 def convertTime(t):
@@ -45,16 +78,16 @@ def convertTime(t):
 
 def convertDate(d):
   ret = []
-  d = [i for i in d if i]
-  days = {'Mon': ["2019-09-09","2019-12-09"]\
-  ,'Tue':["2019-09-03","2019-12-10"]\
-  ,'Wed':["2019-09-04","2019-12-11"]\
-  ,'Thu':["2019-09-05","2019-12-05"]\
-  ,'Fri':["2019-09-06","2019-12-06"]  }
+  d = [i[:2].upper() for i in d if i]
+
+  ret.append(d)
+  days = {'MO': "2019-09-09"\
+  ,'TU':"2019-09-03"\
+  ,'WE':"2019-09-04"\
+  ,'TH':"2019-09-05"\
+  ,'FR':"2019-09-06"  }
   
-  for day in d:
-    ret.append(days[day])
-  
+  ret.append(days[d[0]])
   return ret
 
 def makeObjects(x):
@@ -64,13 +97,10 @@ def makeObjects(x):
 	timeRegex = re.compile(r"(\d+:\d\dpm|\d+:\d\dam)\n(\d+:\d\dpm|\d+:\d\dam)|Arranged")
 	dateRegex = re.compile(r'(Mon|Tue|Wed|Thu|Fri),?(Mon|Tue|Wed|Thu|Fri)?,?(Mon|Tue|Wed|Thu|Fri)?|Arranged')
 
-
 	nums = 	numRegex.findall(x)
 	rooms = roomRegex.findall(x)
 	dates = dateRegex.findall(x)
 	times = timeRegex.findall(x) 
-
-	print(dates)
 
 	for i in range(len(nums)):
 		ret.append(Class(" ".join(nums[i])," ".join(rooms[i]),(convertDate(dates[i]))," ".join(convertTime(times[i]))))
@@ -78,8 +108,8 @@ def makeObjects(x):
 	return ret
 
 def run():
-	#username = input("BU alias")
-	#password = getpass()
+	username = input("BU alias ")
+	password = getpass()
 
 	browser = webdriver.Chrome(r"C:\Users\quinn\Dropbox\Personal Projects\webdriver\chromedriver.exe")
 	browser.get("https://www.bu.edu/studentlink")
@@ -89,7 +119,6 @@ def run():
 
 	html = browser.find_element_by_xpath("/html/body/table[2]/tbody/tr[2]/td/table/tbody/tr/td/font/a[8]")
 	html.click()	
-
 
 	u_field = browser.find_element_by_id('j_username')
 	u_field.send_keys(username)
@@ -114,6 +143,6 @@ def run():
 
 	browser.close()
 	for i in makeObjects(text):
-		print(i)   
+		makeEvent(i)   
 
 run()
